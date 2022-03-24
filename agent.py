@@ -73,16 +73,17 @@ class Agent:
         states, actions, rewards, next_states, dones = experiences
 
         # 目标模型中获取预测的下一个状态动作和 Q 值
-        next_actions, log_probs = self.actor.act(next_states)
+        next_actions, action_probs, log_probs = self.actor.act(next_states)
         q_target1_next = self.critic1_target(next_states, next_actions)
         q_target2_next = self.critic2_target(next_states, next_actions)
 
         # 为当前Q值计算价值
-        q_targets = rewards + (1 - dones) * gamma * (torch.min(q_target1_next, q_target2_next) - self.alpha * log_probs)
+        min_q = torch.min(q_target1_next, q_target2_next)
+        q_targets = rewards + (1 - dones) * gamma * action_probs * (min_q - self.alpha * log_probs)
         q_targets = q_targets.detach()
 
-        q1 = self.critic1(states, actions).gather
-        q2 = self.critic2(states, actions).gather
+        q1 = self.critic1(states, actions)
+        q2 = self.critic2(states, actions)
 
         critic1_loss = 0.5 * F.mse_loss(q1, q_targets)
         critic2_loss = 0.5 * F.mse_loss(q2, q_targets)
@@ -101,7 +102,7 @@ class Agent:
         sample_action, sample_log_prob = self.actor.act(states)
         sample_q1 = self.critic1(states, actions)
         sample_q2 = self.critic2(states, actions)
-        actor_loss = -(torch.min(sample_q1, sample_q2) - self.alpha * sample_log_prob)
+        actor_loss = -action_probs * (torch.min(sample_q1, sample_q2) - self.alpha * sample_log_prob)
         actor_loss = actor_loss.mean()
 
         self.actor_optimizer.zero_grad()
@@ -109,7 +110,7 @@ class Agent:
         self.actor_optimizer.step()
 
         # 更新alpha网络 mea()就是平均梯度（求期望），梯度上升：策略pi是一个函数theta，我们最大化函数值，变量theta对应最大致变量
-        alpha_loss = -(self.alpha * (log_probs + self.target_entropy).detach().cpu()).mean()
+        alpha_loss = -action_probs * self.alpha * (log_probs + self.target_entropy).detach().cpu().mean()
         self.alpha_optimizer.zero_grad()
         alpha_loss.backward()
         self.alpha_optimizer.step()
